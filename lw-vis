@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+
+class Debug
+  def self.suppress
+    begin
+      original_stderr = $stderr.clone
+      original_stdout = $stdout.clone
+      $stderr.reopen(File.new('/dev/null', 'w'))
+      $stdout.reopen(File.new('/dev/null', 'w'))
+      retval = yield
+    rescue Exception => e
+      $stdout.reopen(original_stdout)
+      $stderr.reopen(original_stderr)
+      raise e
+    ensure
+      $stdout.reopen(original_stdout)
+      $stderr.reopen(original_stderr)
+    end
+    retval
+  end
+end
+
+require 'optparse'
+
+options = {
+  out_dir: File.expand_path("."),
+  timestamp: true
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: lw-vis --config FILE [options]"
+
+  opts.on("-h", "--help", "Prints this help") do
+    puts opts
+    exit
+  end
+
+  opts.on("-c", "--config [FILE]", "Configuration file") do |c|
+    options[:config] = c
+  end
+
+  opts.on("-o", "--output [DIR]", "Output folder") do |o|
+    options[:out_dir] = o
+  end
+
+  opts.on("-T", "--skip-timestamp", "No unique file name with timestamp") do
+    options[:timestamp] = false
+  end
+end.parse!
+
+raise "You must supply a config file --config [FILE]" if options[:config].nil?
+
+require "yaml"
+
+directories = YAML.load(File.open(File.join(__dir__, options[:config])).read)
+
+out_dir = File.expand_path(options[:out_dir])
+
+
+directories.each do |dir|
+  command = options[:timestamp] ? "lw-gen-vis #{dir} #{out_dir}" : "lw-gen-vis #{dir} #{out_dir} -T"
+  system command
+end
+

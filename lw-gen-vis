@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+
+require_relative "./debug"
+require 'optparse'
+
+options = {
+  timestamp: true
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: lw-gen-vis input output"
+
+  opts.on("-h", "--help", "Prints this help") do
+    puts opts
+    exit
+  end
+
+  opts.on("-T", "--skip-timestamp", "No unique file name with timestamp") do
+    options[:timestamp] = false
+  end
+end.parse!
+
+input_dir = ARGV[0] ? File.expand_path(ARGV[0]) : File.expand_path(".")
+output_dir = ARGV[1] ? File.expand_path(ARGV[1]) : File.expand_path(".")
+
+def load_env
+  require File.expand_path('./config/environment')
+end
+
+def run_migrations
+  if ActiveRecord::Base.connection.migration_context.needs_migration?
+    begin
+      ActiveRecord::MigrationContext.new("db/migrate").migrate
+    rescue
+      # Try once more after purging db
+      ActiveRecord::Tasks::DatabaseTasks.purge_current
+      ActiveRecord::MigrationContext.new("db/migrate").migrate
+    end
+  end
+end
+
+Dir.chdir(input_dir) do
+  Debug.suppress do
+    system "git clean -df"
+    system "git checkout ."
+
+    system "yarn install"
+    system "bundle install"
+
+    require 'railroady'
+
+    load_env
+    run_migrations
+
+    ModelsDiagram.new(OptionsStruct.new(output: "tmp_md.dot"))
+    .tap(&:process)
+    .tap(&:generate)
+    .print
+
+    ControllersDiagram.new(OptionsStruct.new(output: "tmp_cd.dot"))
+    .tap(&:process)
+    .tap(&:generate)
+    .print
+  end
+
+  project_name = Dir.pwd.split("/").last
+  timestamp = Time.now.to_i
+
+  if options[:timestamp]
+    name = "#{timestamp}_#{project_name}"
+  else
+    name = project_name
+  end
+
+  model_file_name = "#{output_dir}/#{name}_model_diagram.svg"
+  controller_file_name = "#{output_dir}/#{name}_controller_diagram.svg"
+
+  system "dot -Tsvg tmp_md.dot > #{model_file_name}"
+  puts model_file_name
+
+  system "dot -Tsvg tmp_cd.dot > #{controller_file_name}"
+  puts controller_file_name
+
+  system "rm tmp_md.dot"
+  system "rm tmp_cd.dot"
+end
